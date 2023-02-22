@@ -1,15 +1,13 @@
 import { observer } from 'mobx-react-lite'
-import { PermissionAction } from '@supabase/shared-types/out/constants'
-
 import { NextPageWithLayout } from 'types'
-import { checkPermissions } from 'hooks'
-import { DatabaseLayout } from 'components/layouts'
-import { Extensions } from 'components/interfaces/Database'
-import NoPermission from 'components/ui/NoPermission'
-import { Button, IconGlobe, IconMonitor, IconThumbsUp, Tabs } from 'ui'
+import { ReportsLayout } from 'components/layouts'
+import { Button, Tabs, Accordion } from 'ui'
 import useDbQuery from 'hooks/analytics/useDbQuery'
-import { useEffect, useState } from 'react'
 import Table from 'components/to-be-cleaned/Table'
+import { IconAlertCircle, IconCheckCircle, IconCopy } from '@supabase/ui'
+import { executeSql } from 'data/sql/execute-sql-query'
+import { useProjectContext } from 'components/layouts/ProjectLayout/ProjectContext'
+import CopyButton from 'components/ui/CopyButton'
 
 const limit = 50
 
@@ -89,11 +87,12 @@ select
   from pg_statio_user_tables;
 `
 
-export const Content = () => {
+const DatabaseExtensions: NextPageWithLayout = () => {
   const QueryMostFrequentlyInvokedData = useDbQuery(QueryMostFrequentlyInvoked)
   const QueryMostTimeConsumingData = useDbQuery(QueryMostTimeConsuming)
   const QuerySlowestExecutionTimeData = useDbQuery(QuerySlowestExecutionTime)
   const QueryHitRateData = useDbQuery(QueryHitRate)
+  const { project } = useProjectContext()
 
   const isLoadedQueryMostFrequentlyInvokedData =
     QueryMostFrequentlyInvokedData &&
@@ -137,94 +136,124 @@ export const Content = () => {
     console.log('QueryHitRateData', QueryHitRateData)
   }
 
+  const checkAlert = (
+    <div className="w-5 h-5 text-brand-1400 text-brand-900 flex items-center justify-center">
+      <IconCheckCircle strokeWidth={2} size={16} />
+    </div>
+  )
+
+  const warnAlert = (
+    <div className="w-6 h-6 text-yellow-900 flex items-center justify-center">
+      <IconAlertCircle strokeWidth={2} size={16} />
+    </div>
+  )
+  const dangerAlert = (
+    <div className="w-6 h-6 text-red-900 flex items-center justify-center">
+      <IconAlertCircle strokeWidth={2} size={16} />
+    </div>
+  )
+
+  const indexHitRate = QueryHitRateData[0]?.data[0]?.ratio
+  const tableHitRate = QueryHitRateData[0]?.data[1]?.ratio
+  const showIndexWarning =
+    indexHitRate && tableHitRate && (indexHitRate <= 0.99 || tableHitRate <= 0.99)
+
+  const resetPgStatStatements = () => {
+    executeSql({
+      projectRef: project?.ref,
+      connectionString: project?.connectionString,
+      sql: `SELECT pg_stat_statements_reset();`,
+    })
+  }
   return (
-    <div className="my-8">
-      <div className="px-16 mx-auto">
-        <h1 className="text-3xl my-8">Insights</h1>
-      </div>
+    <div className="my-8 px-16 flex flex-col gap-8 justify-start">
+      <h1 className="text-3xl">Insights</h1>
 
-      <div className="px-16 mx-auto my-12">
-        <h4 className="mb-4 text-2xl">Index hit rate</h4>
-        <p className="text-scale-1100 text-sm py-2 mb-6 max-w-2xl">
-          For normal operations of Postgres and performance, you'll want to have your Postgres cache
-          hit ratio about 99%. If you see your cache hit ratio below that, you probably need to look
-          at moving to an instance with larger memory.
-        </p>
-        <div className="flex flex-row gap-16">
-          <div>
-            {isLoadedQueryHitRateData && QueryHitRateData[0]?.data[0]?.name}
-            <div className="flex items-center gap-6">
-              <div className="flex items-baseline">
-                <h1 className="text-5xl">
-                  {isLoadedQueryHitRateData &&
-                    (QueryHitRateData[0]?.data[0]?.ratio * 100).toFixed(2)}
-                </h1>
-                <span className="text-3xl">%</span>
+      <Accordion
+        openBehaviour="multiple"
+        chevronAlign="right"
+        className=" border p-2 bg-scale-300 rounded"
+      >
+        <Accordion.Item
+          header={
+            <div className="flex flex-row gap-2 items-center">
+              <span className="text-xl">Index Efficiency</span>
+              {showIndexWarning ? warnAlert : checkAlert}
+            </div>
+          }
+          id="1"
+          className="flex flex-row gap-8"
+        >
+          {isLoadedQueryHitRateData && (
+            <div className="flex flex-row flex-wrap px-8 py-4">
+              <div className="w-1/2">
+                Index Hit Rate
+                <div className="flex items-center gap-2">
+                  {indexHitRate >= 0.99
+                    ? checkAlert
+                    : indexHitRate >= 0.95
+                    ? warnAlert
+                    : dangerAlert}
+                  <div className="flex items-baseline">
+                    <span className="text-3xl">
+                      {(QueryHitRateData[0]?.data[0]?.ratio * 100).toFixed(2)}
+                    </span>
+                    <span className="text-xl">%</span>
+                  </div>
+                </div>
               </div>
-              <div className="w-8 h-8 bg-brand-400 rounded border border-brand-500 text-brand-900 flex items-center justify-center">
-                <IconThumbsUp strokeWidth={2} size={16} />
+
+              <div className="w-1/2">
+                {QueryHitRateData[0]?.data[1]?.name == 'table hit rate' && 'Table Hit Rate'}
+                <div className="flex items-center gap-2">
+                  {tableHitRate >= 0.99
+                    ? checkAlert
+                    : tableHitRate >= 0.95
+                    ? warnAlert
+                    : dangerAlert}
+                  <div className="flex items-baseline">
+                    <span className="text-3xl">
+                      {(QueryHitRateData[0]?.data[1]?.ratio * 100).toFixed(2)}
+                    </span>
+                    <span className="text-xl">%</span>
+                  </div>
+                </div>
+              </div>
+              <div className="w-full pt-4 m-0">
+                <p className="text-scale-1100 text-sm m-0 p-0">
+                  To best performance, ensure that the cache hit rate ratios above 99%. Consider
+                  upgrading to an instance wiht more memory if the ratios dip below 95%.
+                </p>
               </div>
             </div>
-          </div>
-          <div>
-            {isLoadedQueryHitRateData && QueryHitRateData[0]?.data[1]?.name}
-            <div className="flex items-center gap-6">
-              <div className="flex items-baseline">
-                <h1 className="text-5xl">
-                  {isLoadedQueryHitRateData &&
-                    (QueryHitRateData[0]?.data[1]?.ratio * 100).toFixed(2)}
-                </h1>
-                <span className="text-3xl">%</span>
-              </div>
-              <div className="w-8 h-8 bg-brand-400 rounded border border-brand-500 text-brand-900 flex items-center justify-center">
-                <IconThumbsUp strokeWidth={2} size={16} />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+          )}
+        </Accordion.Item>
+      </Accordion>
 
-      <div className="mx-auto flex flex-col">
-        <div className="px-16">
-          <h4 className="mb-4 text-2xl">Query analysis</h4>
-          <p className="text-scale-1100 text-sm py-2 mb-6 max-w-2xl">
-            PLACEHOLDER We have outlined some query scenarios to check and allow you to analyze
-            wether queries are behaving how you expect
-          </p>
-        </div>
+      <div className="flex flex-col">
+        <h4 className="mb-4 text-2xl">Query Analysis</h4>
         <Tabs
           scrollable
           type="underlined"
           size="medium"
-          listClassNames="px-16"
           addOnAfter={
             <div className="w-full flex justify-end">
-              <Button
-                type="default"
-                onClick={() => {
-                  useDbQuery(`SELECT pg_stat_statements_reset();`)
-                }}
-              >
+              <Button type="default" onClick={resetPgStatStatements}>
                 Reset analysis
               </Button>
             </div>
           }
         >
-          <Tabs.Panel
-            key={1}
-            id="1"
-            label="Most time consuming"
-            className="px-16 text-sm max-w-none"
-          >
+          <Tabs.Panel key={1} id="1" label="Most time consuming" className="text-sm max-w-none">
             <div className="thin-scrollbars max-w-full overflow-scroll">
               <Table
                 head={
                   <>
-                    <Table.th className="table-cell">rol name</Table.th>
-                    <Table.th className="table-cell">prop_total_time</Table.th>
-                    <Table.th className="table-cell">calls</Table.th>
-                    <Table.th className="table-cell">total_time</Table.th>
-                    <Table.th className="table-cell w-[200px]">query</Table.th>
+                    <Table.th className="table-cell">Role</Table.th>
+                    <Table.th className="table-cell">Time Consumed</Table.th>
+                    <Table.th className="table-cell">Calls</Table.th>
+                    <Table.th className="table-cell">Total Time</Table.th>
+                    <Table.th className="table-cell">Query</Table.th>
                   </>
                 }
                 body={
@@ -240,10 +269,11 @@ export const Content = () => {
                           </Table.td>
                           <Table.td className="table-cell whitespace-nowrap">{item.calls}</Table.td>
                           <Table.td className="table-cell whitespace-nowrap">
-                            {item.total_time}
+                            {item.total_time.toFixed(2)}ms
                           </Table.td>
-                          <Table.td className="w-[200px] table-cell whitespace-nowrap truncate">
-                            <p className="truncate">{item.query}</p>
+                          <Table.td className="relative table-cell whitespace-nowrap">
+                            <p className="w-96 block truncate font-mono">{item.query}</p>
+                            <QueryActions sql={item.query} className="absolute inset-y-0 right-0" />
                           </Table.td>
                         </Table.tr>
                       )
@@ -255,25 +285,20 @@ export const Content = () => {
               />
             </div>
           </Tabs.Panel>
-          <Tabs.Panel
-            key={2}
-            id="2"
-            label="Most frequently used"
-            className="px-16 text-sm max-w-none"
-          >
+          <Tabs.Panel key={2} id="2" label="Most frequent" className="text-sm max-w-none">
             <div className="thin-scrollbars max-w-full overflow-scroll">
               <Table
                 head={
                   <>
                     {/* <Table.th className="table-cell">source</Table.th> */}
-                    <Table.th className="table-cell">rolname</Table.th>
-                    <Table.th className="table-cell">avg_rows</Table.th>
-                    <Table.th className="table-cell">calls</Table.th>
-                    <Table.th className="table-cell">max_time</Table.th>
-                    <Table.th className="table-cell">mean_time</Table.th>
-                    <Table.th className="table-cell">min_time</Table.th>
-                    <Table.th className="table-cell">total_time</Table.th>
-                    <Table.th className="table-cell">query</Table.th>
+                    <Table.th className="table-cell">Role</Table.th>
+                    <Table.th className="table-cell">Avg. Roles</Table.th>
+                    <Table.th className="table-cell">Calls</Table.th>
+                    <Table.th className="table-cell">Max Time</Table.th>
+                    <Table.th className="table-cell">Mean Time</Table.th>
+                    <Table.th className="table-cell">Min Time</Table.th>
+                    <Table.th className="table-cell">Total Time</Table.th>
+                    <Table.th className="table-cell">Query</Table.th>
                   </>
                 }
                 body={
@@ -289,19 +314,20 @@ export const Content = () => {
                           </Table.td>
                           <Table.td className="table-cell whitespace-nowrap">{item.calls}</Table.td>
                           <Table.td className="table-cell whitespace-nowrap">
-                            {item.max_time}
+                            {item.max_time.toFixed(2)}ms
                           </Table.td>
                           <Table.td className="table-cell whitespace-nowrap truncate">
-                            {item.mean_time}
+                            {item.mean_time.toFixed(2)}ms
                           </Table.td>
                           <Table.td className="table-cell whitespace-nowrap truncate">
-                            {item.min_time}
+                            {item.min_time.toFixed(2)}ms
                           </Table.td>
                           <Table.td className="table-cell whitespace-nowrap truncate">
-                            {item.total_time}
+                            {item.total_time.toFixed(2)}ms
                           </Table.td>
-                          <Table.td className="table-cell whitespace-nowrap truncate">
-                            {item.query}
+                          <Table.td className="relative table-cell whitespace-nowrap">
+                            <p className="w-64 block truncate font-mono ">{item.query}</p>
+                            <QueryActions sql={item.query} className="absolute inset-y-0 right-0" />
                           </Table.td>
                         </Table.tr>
                       )
@@ -313,24 +339,19 @@ export const Content = () => {
               />
             </div>
           </Tabs.Panel>
-          <Tabs.Panel
-            key={3}
-            id="3"
-            label="Slowest execution time"
-            className="px-16 text-sm max-w-none"
-          >
+          <Tabs.Panel key={3} id="3" label="Slowest execution time" className="text-sm max-w-none">
             <div className="thin-scrollbars max-w-full overflow-scroll">
               <Table
                 head={
                   <>
-                    <Table.th className="table-cell">rolname</Table.th>
-                    <Table.th className="table-cell">avg_rows</Table.th>
-                    <Table.th className="table-cell">calls</Table.th>
-                    <Table.th className="table-cell">max_time</Table.th>
-                    <Table.th className="table-cell">mean_time</Table.th>
-                    <Table.th className="table-cell">min_time</Table.th>
-                    <Table.th className="table-cell">total_time</Table.th>
-                    <Table.th className="table-cell">query</Table.th>
+                    <Table.th className="table-cell">Role</Table.th>
+                    <Table.th className="table-cell">Avg Rows</Table.th>
+                    <Table.th className="table-cell">Calls</Table.th>
+                    <Table.th className="table-cell">Max Time</Table.th>
+                    <Table.th className="table-cell">Mean Time</Table.th>
+                    <Table.th className="table-cell">Min Time</Table.th>
+                    <Table.th className="table-cell">Total Time</Table.th>
+                    <Table.th className="table-cell">Query</Table.th>
                   </>
                 }
                 body={
@@ -346,19 +367,20 @@ export const Content = () => {
                           </Table.td>
                           <Table.td className="table-cell whitespace-nowrap">{item.calls}</Table.td>
                           <Table.td className="table-cell whitespace-nowrap">
-                            {item.max_time}
+                            {item.max_time.toFixed(2)}ms
                           </Table.td>
                           <Table.td className="table-cell whitespace-nowrap truncate">
-                            {item.mean_time}
+                            {item.mean_time.toFixed(2)}ms
                           </Table.td>
                           <Table.td className="table-cell whitespace-nowrap truncate">
-                            {item.min_time}
+                            {item.min_time.toFixed(2)}ms
                           </Table.td>
                           <Table.td className="table-cell whitespace-nowrap truncate">
-                            {item.total_time}
+                            {item.total_time.toFixed(2)}ms
                           </Table.td>
-                          <Table.td className="table-cell whitespace-nowrap truncate">
-                            {item.query}
+                          <Table.td className="relative table-cell whitespace-nowrap">
+                            <p className="w-64 block truncate font-mono">{item.query}</p>
+                            <QueryActions sql={item.query} className="absolute inset-y-0 right-0" />
                           </Table.td>
                         </Table.tr>
                       )
@@ -376,10 +398,16 @@ export const Content = () => {
   )
 }
 
-const DatabaseExtensions: NextPageWithLayout = () => {
-  return <Content />
+const QueryActions = ({ sql, className }: { sql: string; className: string }) => {
+  if (sql.includes('insufficient privilege')) return null
+
+  return (
+    <div className={[className, 'flex justify-center items-center'].join(' ')}>
+      <CopyButton type="default" text={sql} bounceIconOnCopy />
+    </div>
+  )
 }
 
-DatabaseExtensions.getLayout = (page) => <DatabaseLayout title="Database">{page}</DatabaseLayout>
+DatabaseExtensions.getLayout = (page) => <ReportsLayout title="Database">{page}</ReportsLayout>
 
 export default observer(DatabaseExtensions)
